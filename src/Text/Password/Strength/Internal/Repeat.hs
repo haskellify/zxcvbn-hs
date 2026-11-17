@@ -24,10 +24,9 @@ module Text.Password.Strength.Internal.Repeat (
 
 --------------------------------------------------------------------------------
 -- Library Imports:
-import Control.Arrow ((&&&))
-import Control.Lens ((^.), _1)
+import Control.Lens ((^.))
 import Data.Function (on)
-import Data.List (sortBy, subsequences, maximumBy)
+import Data.List (sortBy, maximumBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text (Text)
@@ -64,37 +63,41 @@ mkRepeatMap = RepeatMap . Map.foldrWithKey f Map.empty
 -- "wordword".
 repeatMatch :: RepeatMap -> Token -> Maybe (Repeat, Token)
 repeatMatch m t =
-    Map.lookup (t ^. tokenChars) (getMap m) >>=
-      ordered >>=
-        longestSequence >>=
-          mkToken
+    mkToken <$>
+      (Map.lookup (t ^. tokenChars) (getMap m) >>=
+        ordered >>=
+          longestSequence)
   where
     ordered :: [Token] -> Maybe [Token]
     ordered []  = Nothing
     ordered [_] = Nothing -- Must have at least two elements to repeat.
     ordered xs  = Just $ sortBy (compare `on` (^. startIndex)) xs
 
-    longestSequence :: [Token] -> Maybe (Repeat, [Token])
+    -- The longest run of back-to-back tokens.  When several runs have
+    -- the same length the last one wins.
+    longestSequence :: [Token] -> Maybe (Repeat, Token, Token)
     longestSequence ts =
-      let f = filter (\(n,_) -> n >= 2) .
-                map (length &&& id) .
-                  filter (all isSequence . lineUp) .
-                    subsequences
-      in case f ts of
+      case filter (\(n, _, _) -> n >= 2) (runs ts) of
         [] -> Nothing
-        xs -> Just $ maximumBy (compare `on` (^. _1)) xs
+        xs -> Just $ maximumBy (compare `on` (\(n, _, _) -> n)) xs
 
-    mkToken :: (Repeat, [Token]) -> Maybe (Repeat, Token)
-    mkToken (_, []) = Nothing
-    mkToken (n, ts) = Just $
-      let s = head ts ^. startIndex
-          e = last ts ^. endIndex
-          c = Text.replicate n (t ^. tokenChars)
+    -- For every token (ordered by start index), the length and the
+    -- first token of the longest run that ends with it.  Each lookup
+    -- only needs the run ending right before the token starts, so
+    -- this is linear in the number of tokens instead of trying all
+    -- of their subsequences.
+    runs :: [Token] -> [(Repeat, Token, Token)]
+    runs = go Map.empty
+      where
+        go :: Map Int (Repeat, Token) -> [Token] -> [(Repeat, Token, Token)]
+        go _ [] = []
+        go ends (x:xs) =
+          let (n, s) = maybe (1, x) (\(k, f) -> (k + 1, f))
+                         (Map.lookup ((x ^. startIndex) - 1) ends)
+          in (n, s, x) : go (Map.insert (x ^. endIndex) (n, s) ends) xs
+
+    mkToken :: (Repeat, Token, Token) -> (Repeat, Token)
+    mkToken (n, s, e) =
+      let c = Text.replicate n (t ^. tokenChars)
           l = Text.replicate n (t ^. tokenLower)
-      in (n, Token c l s e)
-
-    lineUp :: [Token] -> [(Token, Token)]
-    lineUp xs = zip xs (drop 1 xs)
-
-    isSequence :: (Token, Token) -> Bool
-    isSequence (x, y) = (y ^. startIndex) - (x ^. endIndex) == 1
+      in (n, Token c l (s ^. startIndex) (e ^. endIndex))

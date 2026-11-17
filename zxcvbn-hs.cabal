@@ -137,6 +137,7 @@ test-suite test
     Zxcvbn.Adjacency
     Zxcvbn.Date
     Zxcvbn.Estimate
+    Zxcvbn.L33t
     Zxcvbn.Match
     Zxcvbn.Repeat
     Zxcvbn.Search

@@ -35,6 +35,8 @@ module Text.Password.Strength.Internal.Token (
 --------------------------------------------------------------------------------
 -- Library Imports:
 import Control.Lens.TH (makeLenses)
+import Data.List (nub)
+import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -80,19 +82,18 @@ allTokens = outer 0
 -- | Translate the characters of a 'Text' value.
 --
 -- Given a function that translates a character into one or more
--- characters, return all possible translations.
+-- characters, return all possible translations.  Like zxcvbn, a
+-- character is translated the same way everywhere in the text, so the
+-- number of translations depends on the distinct characters and not
+-- on the length of the text.
 --
 -- Examples:
 --
--- >>> translateMap l33t2Eng "p111
--- ["piii","plii","pili","plli","piil","plil","pill","plll"]
+-- >>> translateMap l33t2Eng "p111"
+-- ["piii","plll"]
 translateMap :: (Char -> String) -> Text -> [Text]
-translateMap f = map Text.pack . Text.foldr fork [""]
+translateMap f t = map (\m -> Text.map (\c -> Map.findWithDefault c c m) t) subs
   where
-    fork :: Char -> [String] -> [String]
-    fork c cs =
-      case f c of
-        [] -- No translations so keep the existing char:
-          -> map (c:) cs
-        xs -- Add (length xs) new forks of the text:
-          -> concatMap (\c' -> map (c':) cs) xs
+    subs :: [Map.Map Char Char]
+    subs = map Map.fromList $ sequence
+      [ [ (c, c') | c' <- cs ] | c <- nub (Text.unpack t), let cs = f c, not (null cs) ]
